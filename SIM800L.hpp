@@ -11,13 +11,8 @@ public:
     SIM800();
     void begin(HardwareSerial& serial, uint32_t baud = 9600);
 
-    // Befehl senden mit Callback
     void sendCommand(const String& cmd, Callback cb, uint32_t timeoutMs = 1000);
-
-    // Events abonnieren (z.B. "RING", "SMS Ready", "ERROR")
     void onEvent(const String& eventName, Callback cb);
-
-    // im Loop aufrufen
     void loop();
 
 private:
