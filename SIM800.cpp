@@ -1,13 +1,30 @@
 #include "SIM800.hpp"
 
-SIM800::SIM800() : _serial(nullptr), _rxBuffer(), _inCommand(false) {}
+SIM800::SIM800() 
+    : _serial(nullptr), _rxBuffer(), _inCommand(false),
+      _debugEnabled(false), _debugOut(nullptr) {}
 
 void SIM800::begin(HardwareSerial& serial, uint32_t baud) {
     _serial = &serial;
     _serial->begin(baud);
 }
 
-// Hilfsfunktion: liest bis '\n' oder bis '>' (Prompt). Timeouts in kleinen Schritten.
+void SIM800::enableDebug(Stream& debugOut) {
+    _debugEnabled = true;
+    _debugOut = &debugOut;
+}
+
+void SIM800::disableDebug() {
+    _debugEnabled = false;
+    _debugOut = nullptr;
+}
+
+void SIM800::dbgPrint(const String& msg) {
+    if (_debugEnabled && _debugOut) {
+        _debugOut->println(msg);
+    }
+}
+
 bool SIM800::readNextToken(String &outLine, bool &isPrompt, uint32_t timeoutMs) {
     outLine = "";
     isPrompt = false;
@@ -17,58 +34,48 @@ bool SIM800::readNextToken(String &outLine, bool &isPrompt, uint32_t timeoutMs) 
     while (millis() - start < timeoutMs) {
         while (_serial->available()) {
             char ch = (char)_serial->read();
-            // Prompt detection: '>' (oft ohne NL)
+            if (_debugEnabled && _debugOut) _debugOut->write(ch);
+
             if (ch == '>') {
                 isPrompt = true;
-                // discard trailing space if any
                 while (_serial->available()) {
                     char nxt = (char)_serial->peek();
-                    if (nxt == ' ') { _serial->read(); } else break;
+                    if (nxt == ' ') { _serial->read(); if(_debugEnabled) _debugOut->write(nxt);} else break;
                 }
                 return true;
             }
             if (ch == '\r') continue;
             if (ch == '\n') {
-                // ignore empty lines
                 if (outLine.length() == 0) continue;
                 isPrompt = false;
                 return true;
             }
             outLine += ch;
-            // Protect against extremely long lines
-            if (outLine.length() > 1024) {
-                return true;
-            }
+            if (outLine.length() > 1024) return true;
         }
-        delay(1); // yield; erlaubt auch ESP internals zu laufen
+        delay(1);
     }
     return false;
 }
 
 void SIM800::dispatchEventIfMatched(const String& line) {
     for (auto &kv : _eventHandlers) {
-        const String &prefix = kv.first;
-        if (prefix.length() > 0 && line.startsWith(prefix)) {
+        if (kv.first.length() > 0 && line.startsWith(kv.first)) {
             kv.second(line);
             return;
         }
     }
 }
 
-// Blockierend, verarbeitet eingehende Zeilen bis OK/ERROR oder Prompt oder Timeout.
 SIM800Response SIM800::sendCommand(const String& cmd, uint32_t timeoutMs) {
     if (!_serial) return { SIM800Result::UNKNOWN, "NO_SERIAL" };
-
-    // einfache Reentrancy-Sperre
     if (_inCommand) return { SIM800Result::UNKNOWN, "BUSY" };
     _inCommand = true;
 
-    // kleine Drain: vorhandene Bytes kurz leeren (verhindert alte Daten)
-    uint32_t drainStart = millis();
-    while (_serial->available() && (millis() - drainStart) < 50) { (void)_serial->read(); }
+    while (_serial->available()) { (void)_serial->read(); }
 
-    // Senden
-    _serial->print(cmd+"\r");
+    dbgPrint(">> " + cmd);
+    _serial->println(cmd);
 
     uint32_t start = millis();
     String collected = "";
@@ -77,37 +84,28 @@ SIM800Response SIM800::sendCommand(const String& cmd, uint32_t timeoutMs) {
     while (millis() - start < timeoutMs) {
         String line;
         bool isPrompt = false;
-        // Lese mit kleinem inner-loop timeout; so können Events schnell dispatched werden
-        if (!readNextToken(line, isPrompt, 200)) {
-            continue;
-        }
+        if (!readNextToken(line, isPrompt, 200)) continue;
 
         if (isPrompt) {
-            // Prompt -> Modul erwartet jetzt Body (z.B. SMS). Rückgabe PROMPT, payload bisher gesammelt.
+            dbgPrint("<< PROMPT");
             _inCommand = false;
             return { SIM800Result::PROMPT, collected };
         }
 
-        // ignore pure empty lines
         if (line.length() == 0) continue;
+        if (!seenEcho && line == cmd) { seenEcho = true; continue; }
 
-        // Modul echo: oft wird der gesendete Befehl wiederholt. Ignoriere das Echo.
-        if (!seenEcho && line == cmd) {
-            seenEcho = true;
-            continue;
-        }
-
-        // Finalstatus prüfen
         if (line == "OK") {
+            dbgPrint("<< OK");
             _inCommand = false;
             return { SIM800Result::SUCCESS, collected };
         }
         if (line == "ERROR") {
+            dbgPrint("<< ERROR");
             _inCommand = false;
             return { SIM800Result::ERROR, collected };
         }
 
-        // Falls die Line zu einem Event passt, dispatchen und nicht zur Response zählen
         bool handled = false;
         for (auto &kv : _eventHandlers) {
             if (kv.first.length() > 0 && line.startsWith(kv.first)) {
@@ -118,17 +116,18 @@ SIM800Response SIM800::sendCommand(const String& cmd, uint32_t timeoutMs) {
         }
         if (handled) continue;
 
-        // sonst: zur gesammelten Antwort hinzufügen
         if (collected.length()) collected += '\n';
         collected += line;
     }
 
+    dbgPrint("<< TIMEOUT");
     _inCommand = false;
     return { SIM800Result::TIMEOUT, collected };
 }
 
 void SIM800::sendRaw(const String& data) {
     if (!_serial) return;
+    dbgPrint(">> RAW: " + data);
     _serial->print(data);
 }
 
@@ -146,23 +145,23 @@ SIM800Response SIM800::waitForResponse(uint32_t timeoutMs) {
         if (!readNextToken(line, isPrompt, 200)) continue;
 
         if (isPrompt) {
-            // unerwartetes prompt während waitForResponse - gib PROMPT zurück
+            dbgPrint("<< PROMPT");
             _inCommand = false;
             return { SIM800Result::PROMPT, collected };
         }
-
         if (line.length() == 0) continue;
 
         if (line == "OK") {
+            dbgPrint("<< OK");
             _inCommand = false;
             return { SIM800Result::SUCCESS, collected };
         }
         if (line == "ERROR") {
+            dbgPrint("<< ERROR");
             _inCommand = false;
             return { SIM800Result::ERROR, collected };
         }
 
-        // Events dispatchen
         bool handled = false;
         for (auto &kv : _eventHandlers) {
             if (kv.first.length() > 0 && line.startsWith(kv.first)) {
@@ -177,6 +176,7 @@ SIM800Response SIM800::waitForResponse(uint32_t timeoutMs) {
         collected += line;
     }
 
+    dbgPrint("<< TIMEOUT");
     _inCommand = false;
     return { SIM800Result::TIMEOUT, collected };
 }
@@ -185,13 +185,14 @@ void SIM800::onEvent(const String& prefix, EventHandler cb) {
     _eventHandlers[prefix] = cb;
 }
 
-// Nicht-blockierender loop: liest komplette Zeilen und dispatcht Events (wenn keine sendCommand läuft)
 void SIM800::loop() {
     if (!_serial) return;
-    if (_inCommand) return; // während eines blocking-commands nicht parallel arbeiten
+    if (_inCommand) return;
 
     while (_serial->available()) {
         char ch = (char)_serial->read();
+        if (_debugEnabled && _debugOut) _debugOut->write(ch);
+
         if (ch == '\r') continue;
         if (ch == '\n') {
             if (_rxBuffer.length() > 0) {
@@ -199,14 +200,13 @@ void SIM800::loop() {
                 _rxBuffer = "";
             }
         } else {
-            // prompt detection auch hier
             if (ch == '>') {
                 String tmp = ">";
                 dispatchEventIfMatched(tmp);
                 continue;
             }
             _rxBuffer += ch;
-            if (_rxBuffer.length() > 1024) _rxBuffer = ""; // safety
+            if (_rxBuffer.length() > 1024) _rxBuffer = "";
         }
     }
 }
