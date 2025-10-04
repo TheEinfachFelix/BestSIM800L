@@ -15,7 +15,7 @@ struct CREGInfo {
 };
 
 enum class SIM800PinStatus {
-    READY,        // kein PIN nötig
+    READY,       // kein PIN nötig
     SIM_PIN,     // PIN nötig
     SIM_PUK,     // PUK nötig
     PH_SIM_PIN,  // Telefon-Sperre (antitheft)

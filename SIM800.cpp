@@ -4,9 +4,19 @@ SIM800::SIM800()
     : _serial(nullptr), _rxBuffer(), _inCommand(false),
       _debugEnabled(false), _debugOut(nullptr) {}
 
-void SIM800::begin(HardwareSerial& serial, uint32_t baud) {
+void SIM800::begin(HardwareSerial& serial, uint32_t baud, int dtrPin, int rtsPin) {
     _serial = &serial;
     _serial->begin(baud);
+    if (dtrPin >= 0) {
+        pinMode(dtrPin, OUTPUT);
+        digitalWrite(dtrPin, HIGH); // DTR high = normal operation
+        this->dtrPin = dtrPin;
+    }
+    if (rtsPin >= 0) {
+        pinMode(rtsPin, OUTPUT);
+        digitalWrite(rtsPin, HIGH); // RTS high = normal operation
+        this->rtsPin = rtsPin;
+    }
 }
 
 void SIM800::enableDebug(Stream& debugOut) {
@@ -228,4 +238,20 @@ void SIM800::loop() {
             if (_rxBuffer.length() > 1024) _rxBuffer = "";
         }
     }
+}
+
+void SIM800::reset() {
+    if (rtsPin < 0) return;
+    
+    digitalWrite(rtsPin, LOW);
+    delay(100); // 100 ms LOW halten
+    digitalWrite(rtsPin, HIGH);
+}
+
+void SIM800::toggleDtr() {
+    if (dtrPin < 0) return;
+
+    digitalWrite(dtrPin, LOW);
+    delay(100); // 100 ms LOW halten
+    digitalWrite(dtrPin, HIGH);
 }

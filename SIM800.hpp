@@ -21,7 +21,7 @@ public:
     using EventHandler = std::function<void(const String&)>;
 
     SIM800();
-    void begin(HardwareSerial& serial, uint32_t baud = 9600);
+    void begin(HardwareSerial& serial, uint32_t baud = 9600, int dtrPin = -1, int rtsPin = -1);
 
     SIM800Response sendCommand(const String& cmd, uint32_t timeoutMs = 2000);
     void sendRaw(const String& data);
@@ -34,6 +34,9 @@ public:
     void enableDebug(Stream& debugOut = Serial);
     void disableDebug();
 
+    void reset();
+    void toggleDtr();
+
 private:
     HardwareSerial* _serial;
     String _rxBuffer;
@@ -42,6 +45,9 @@ private:
 
     bool _debugEnabled;
     Stream* _debugOut;
+
+    int dtrPin = -1;
+    int rtsPin = -1;
 
     bool readNextToken(String &outLine, bool &isPrompt, uint32_t timeoutMs);
     void dispatchEventIfMatched(const String& line);
