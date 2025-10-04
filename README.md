@@ -24,7 +24,3 @@ bool getNetworkRegistration(CREGInfo& out, uint32_t timeoutMs = 2000);
 SIM800Response sendSMS(const String& number, const String& text, uint32_t timeoutMs = 10000);
 
 ```
-
-## TODO
-
-- Sleep und wakeup
