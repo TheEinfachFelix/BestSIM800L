@@ -12,16 +12,35 @@ void SIM800::begin(HardwareSerial& serial, uint32_t baud) {
 void SIM800::enableDebug(Stream& debugOut) {
     _debugEnabled = true;
     _debugOut = &debugOut;
+    sendCommand("AT+CMEE=2"); // Verbose Fehlercodes
 }
 
 void SIM800::disableDebug() {
     _debugEnabled = false;
     _debugOut = nullptr;
+    sendCommand("AT+CMEE=1");
 }
 
 void SIM800::dbgPrint(const String& msg) {
     if (_debugEnabled && _debugOut) {
-        _debugOut->println(msg);
+        String outMsg = msg;
+        outMsg.replace("\n", "/n");  // \n ersetzen
+        outMsg.replace("\r", "/r");  // \r ersetzen
+        _debugOut->println(outMsg);
+    }
+}
+
+void SIM800::dbgByte(char c) {
+    if (!_debugEnabled || !_debugOut) return;
+
+    if (c == '\r') {
+        _debugOut->print("/r");
+    } else if (c == '\n') {
+        _debugOut->print("/n\n"); // optional: neue Zeile nach /n
+    } else if (c < 32 || c > 126) {
+        _debugOut->print('?'); // unlesbare Zeichen als ?
+    } else {
+        _debugOut->print(c);
     }
 }
 
@@ -34,7 +53,7 @@ bool SIM800::readNextToken(String &outLine, bool &isPrompt, uint32_t timeoutMs) 
     while (millis() - start < timeoutMs) {
         while (_serial->available()) {
             char ch = (char)_serial->read();
-            if (_debugEnabled && _debugOut) _debugOut->write(ch);
+            dbgByte(ch); 
 
             if (ch == '>') {
                 isPrompt = true;

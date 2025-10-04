@@ -47,4 +47,5 @@ private:
     void dispatchEventIfMatched(const String& line);
 
     void dbgPrint(const String& msg);
+    void dbgByte(char c);
 };
