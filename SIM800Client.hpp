@@ -47,6 +47,8 @@ public:
 
     SIM800Response sendSMS(const String& number, const String& text, uint32_t timeoutMs = DEFAULT_TIMEOUT);
 
+    SIM800Response sleep(uint32_t timeoutMs = DEFAULT_TIMEOUT);
+    void wakeUp();
 private:
     SIM800& _modem;
     bool _debugEnabled;

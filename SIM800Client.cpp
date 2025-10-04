@@ -168,3 +168,13 @@ bool extractAtField(const String& payload, const char* tag, String& out) {
     out.trim();
     return true;
 }
+
+SIM800Response SIM800Client::sleep(uint32_t timeoutMs) {
+    dbgPrint("Sleep");
+    return _modem.sendCommand("AT+CSCLK=1", timeoutMs);
+}
+void SIM800Client::wakeUp() {
+    dbgPrint("Wake up");
+    _modem.toggleDtr();
+    _modem.sendCommand("AT+CSCLK=0", 2000);
+}
